@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License")); you may not use this file except in compliance with
@@ -16,26 +16,17 @@
 *
 */
 
-#include <Defs.h>
-#include <DeviceDefs.h>
+#include <defs.h>
+#include <devicedefs.h>
 
 #include "Sea.h"
 
-#include "Print.h"
 #include "Sysload.h"
 
-BOOLEAN
+NTSTATUS
 NTAPI
-_DllMainCRTStartupForGS(
-    __in PVOID DllHandle,
-    __in ULONG Reason,
-    __in_opt PCONTEXT Context
-);
-
-VOID
-NTAPI
-Startup(
-    VOID
+NtProcessStartup(
+    __in PPEB PebBase
 )
 {
     NTSTATUS Status = STATUS_SUCCESS;
@@ -44,52 +35,102 @@ Startup(
     UNICODE_STRING FilePath = { 0 };
     OBJECT_ATTRIBUTES ObjectAttributes = { 0 };
     IO_STATUS_BLOCK IoStatusBlock = { 0 };
+    UNICODE_STRING ImagePath = { 0 };
+    WCHAR ImagePathBuffer[MAXIMUM_FILENAME_LENGTH] = { 0 };
+    TCHAR ErrorString[MAXIMUM_FILENAME_LENGTH] = { 0 };
+    RTL_OSVERSIONINFOW OsVersionInfo = { 0 };
 
-    Result = _DllMainCRTStartupForGS(
-        NtCurrentPeb()->ImageBaseAddress,
-        DLL_PROCESS_ATTACH,
-        NULL);
-
-    if (FALSE != Result) {
-        Status = LoadSystemImage(MANAGER_IMAGE_LINK, MANAGER_SERVICE_LINK);
-
-        if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
-            RtlInitUnicodeString(&FilePath, MANAGER_DEVICE_LINK);
-
-            InitializeObjectAttributes(
-                &ObjectAttributes,
-                &FilePath,
-                OBJ_CASE_INSENSITIVE,
+    if (NT_SUCCESS(RtlGetVersion(&OsVersionInfo))) {
+        if (OsVersionInfo.dwBuildNumber >= 7600 &&
+            OsVersionInfo.dwBuildNumber < 18362) {
+            Status = RtlDosPathNameToNtPathName_U_WithStatus(
+                LOADER_STRING,
+                &ImagePath,
                 NULL,
                 NULL);
 
-            Status = NtOpenFile(
-                &FileHandle,
-                FILE_ALL_ACCESS,
-                &ObjectAttributes,
-                &IoStatusBlock,
-                FILE_SHARE_VALID_FLAGS,
-                FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
-
             if (NT_SUCCESS(Status)) {
-                Status = NtDeviceIoControlFile(
-                    FileHandle,
-                    NULL,
-                    NULL,
-                    NULL,
-                    &IoStatusBlock,
-                    API_METHOD_DISABLE_PATCHGUARD,
-                    NULL,
-                    0,
-                    NULL,
-                    0);
+                RtlCopyMemory(ImagePathBuffer, ImagePath.Buffer, ImagePath.Length);
 
-                RTL_SOFT_ASSERT(NT_SUCCESS(NtClose(FileHandle)));
+                Status = LoadKernelImage(ImagePathBuffer, SERVICE_STRING);
+
+                if (NT_SUCCESS(Status)) {
+                    RtlInitUnicodeString(&FilePath, DEVICE_STRING);
+
+                    InitializeObjectAttributes(
+                        &ObjectAttributes,
+                        &FilePath,
+                        OBJ_CASE_INSENSITIVE,
+                        NULL,
+                        NULL);
+
+                    Status = NtOpenFile(
+                        &FileHandle,
+                        FILE_ALL_ACCESS,
+                        &ObjectAttributes,
+                        &IoStatusBlock,
+                        FILE_SHARE_VALID_FLAGS,
+                        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT);
+
+                    if (NT_SUCCESS(Status)) {
+                        Status = NtDeviceIoControlFile(
+                            FileHandle,
+                            NULL,
+                            NULL,
+                            NULL,
+                            &IoStatusBlock,
+                            0,
+                            NULL,
+                            0,
+                            NULL,
+                            0);
+
+                        if (NT_SUCCESS(Status)) {
+                        }
+                        else {
+                            _stprintf(
+                                ErrorString,
+                                TEXT("communication failure error code < %08x >\n"),
+                                Status);
+
+                            MessageBox(NULL, ErrorString, TEXT("error"), MB_OK);
+                        }
+
+                        NT_SUCCESS(NtClose(FileHandle));
+                    }
+                    else {
+                        _stprintf(
+                            ErrorString,
+                            TEXT("open communication port failure error code < %08x >\n"),
+                            Status);
+
+                        MessageBox(NULL, ErrorString, TEXT("error"), MB_OK);
+                    }
+
+                    UnloadKernelImage(SERVICE_STRING);
+                }
+                else {
+                    _stprintf(
+                        ErrorString,
+                        TEXT("load driver error code < %08x >\n"),
+                        Status);
+
+                    MessageBox(NULL, ErrorString, TEXT("error"), MB_OK);
+                }
+
+                RtlFreeUnicodeString(&ImagePath);
             }
+        }
+        else {
+            _stprintf(
+                ErrorString,
+                TEXT("free version only support windows version 7600 ~ 17763"));
 
-            UnloadSystemImage(MANAGER_SERVICE_LINK);
+            MessageBox(NULL, ErrorString, TEXT("error"), MB_OK);
         }
     }
 
-    NtTerminateProcess(NtCurrentProcess(), STATUS_SUCCESS);
+    return  NtTerminateProcess(
+        NtCurrentProcess(),
+        STATUS_SUCCESS);
 }

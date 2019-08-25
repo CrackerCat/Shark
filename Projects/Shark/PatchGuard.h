@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License"); you may not use this file except in compliance with
@@ -21,14 +21,13 @@
 
 #include "..\..\WRK\base\ntos\mm\mi.h"
 
-#include "KernelReload.h"
+#include "Detours.h"
+#include "Reload.h"
 
 #ifdef __cplusplus
 /* Assume byte packing throughout */
 extern "C" {
 #endif	/* __cplusplus */
-
-    typedef LONG EX_SPIN_LOCK, *PEX_SPIN_LOCK;
 
 #define POOL_BIG_TABLE_ENTRY_FREE 0x1
 
@@ -39,199 +38,182 @@ extern "C" {
         SIZE_T NumberOfPages;
     } POOL_BIG_PAGES, *PPOOL_BIG_PAGES;
 
-    typedef struct _KPRIQUEUE {
-        DISPATCHER_HEADER Header;
-        LIST_ENTRY EntryListHead[32];
-        LONG CurrentCount[32];
-        ULONG MaximumCount;
-        LIST_ENTRY ThreadListHead;
-    }KPRIQUEUE, *PKPRIQUEUE;
+    enum {
+        PgPoolBigPage,
+        PgSystemPtes
+    };
 
-    typedef struct _PATCHGUARD_BLOCK {
-#define PG_MAXIMUM_CONTEXT_COUNT 0x00000002UI32
-#define PG_KEY_INTERVAL 0x00000080UI32
-#define PG_FIRST_FIELD_OFFSET 0x00000100UI32
-#define PG_CMP_APPEND_DLL_SECTION_END 0x000000c0UI32
-#define PG_COMPARE_FIELDS_COUNT  0x00000004UI32
+    enum {
+        PgDeclassified,
+        PgEncrypted
+    };
+
+    typedef struct _PGOBJECT {
+        LIST_ENTRY Entry;
+        BOOLEAN Encrypted;
+        ULONG64 XorKey;
+        CCHAR Type;
+        PVOID BaseAddress;
+        SIZE_T RegionSize;
+        GUARD_BODY Body;
+    }PGOBJECT, *PPGOBJECT;
+
+    typedef struct _PGBLOCK {
+        // struct _GPBLOCK Block;
+
+#define PG_MAXIMUM_CONTEXT_COUNT 0x00000002UI32 // Worker 中可能存在的 Context 最大数量
+#define PG_FIRST_FIELD_OFFSET 0x00000100UI32 // 搜索使用的第一个 Context 成员偏移
+#define PG_CMP_APPEND_DLL_SECTION_END 0x000000c0UI32 // CmpAppendDllSection 长度
+#define PG_COMPARE_FIELDS_COUNT 0x00000004UI32 // 搜索时比较的 Context 成员数量
+
+        // EntryPoint 缓存大小 用来搜索头部的代码片段 ( 最小长度 =  max(2 * 8 + 7, sizeof(DETOUR_BODY)) )
+#define PG_MAXIMUM_EP_BUFFER_COUNT ((max(2 * 8 + 7, sizeof(DETOUR_BODY)) + 7) & ~7)
 
 #define PG_FIELD_BITS \
             ((ULONG)((((PG_FIRST_FIELD_OFFSET + PG_COMPARE_FIELDS_COUNT * sizeof(PVOID)) \
                 - PG_CMP_APPEND_DLL_SECTION_END) / sizeof(PVOID)) - 1))
 
-        PVOID
-        (NTAPI * IoGetInitialStack)(
-            VOID
-            );
-
-        PVOID WorkerContext;
-
-        VOID
-        (NTAPI * ExpWorkerThread)(
-            __in PVOID StartContext
-            );
-
-        VOID
-        (NTAPI * PspSystemThreadStartup)(
-            __in PKSTART_ROUTINE StartRoutine,
-            __in PVOID StartContext
-            );
-
-        VOID
-        (NTAPI * KiStartSystemThread)(
-            VOID
-            );
-
-        ULONG
-        (NTAPI * DbgPrint)(
-            __in PCH Format,
-            ...
-            );
-
-        // pointer to _Message[0]
-        PVOID ClearEncryptedContextMessage;
-
-        // pointer to _Message[1]
-        PVOID RevertWorkerToSelfMessage;
-
-        SIZE_T
-        (NTAPI * RtlCompareMemory)(
-            const VOID * Destination,
-            const VOID * Source,
-            SIZE_T Length
-            );
-
-        // pointer to _SdbpCheckDll
-        PVOID SdbpCheckDll;
-        SIZE_T SizeOfSdbpCheckDll;
-
-        // pointer to _CheckPatchGuardCode
-        BOOLEAN
-        (NTAPI * CheckPatchGuardCode)(
-            __in PVOID BaseAddress,
-            __in SIZE_T RegionSize
-            );
-
-        // pointer to _ClearEncryptedContext
-        VOID
-        (NTAPI * ClearEncryptedContext)(
-            VOID
-            );
-
-        // pointer to _RevertWorkerToSelf
-        VOID
-        (NTAPI * RevertWorkerToSelf)(
-            VOID
-            );
-
-        VOID
-        (NTAPI * RtlRestoreContext)(
-            __in PCONTEXT ContextRecord,
-            __in_opt struct _EXCEPTION_RECORD *ExceptionRecord
-            );
-
-        VOID
-        (NTAPI * ExQueueWorkItem)(
-            __inout PWORK_QUEUE_ITEM WorkItem,
-            __in WORK_QUEUE_TYPE QueueType
-            );
-
-        VOID
-        (NTAPI * ExFreePool)(
-            __in PVOID P
-            );
-
-        KEVENT Notify;
-
-        PKLDR_DATA_TABLE_ENTRY KernelDataTableEntry;
-
-        ULONG BuildNumber;
-
-        PPOOL_BIG_PAGES PoolBigPageTable;
-        SIZE_T PoolBigPageTableSize;
-        PEX_SPIN_LOCK ExpLargePoolTableLock;
+        BOOLEAN BtcEnable;
+        ULONG OffsetEntryPoint;
+        ULONG SizeCmpAppendDllSection;
+        ULONG SizeINITKDBG;
+        SIZE_T SizeSdbpCheckDll;
+        ULONG_PTR Fields[PG_COMPARE_FIELDS_COUNT];
+        CHAR Header[PG_MAXIMUM_EP_BUFFER_COUNT];
 
         struct {
-            PRTL_BITMAP BitMap;
+            PPOOL_BIG_PAGES PoolBigPageTable;
+            SIZE_T PoolBigPageTableSize;
+            PEX_SPIN_LOCK ExpLargePoolTableLock;
+
+            POOL_TYPE
+            (NTAPI * MmDeterminePoolType)(
+                __in PVOID VirtualAddress
+                );
+        }; // pool big page
+
+        struct {
+            ULONG_PTR NumberOfPtes;
             PMMPTE BasePte;
-        }SystemPtes;
+        }; // system ptes
 
-        BOOLEAN IsBtcEncryptedEnable;
-        ULONG RvaOffsetOfEntry;
-        ULONG SizeOfCmpAppendDllSection;
-        ULONG SizeOfNtSection;
-        ULONG_PTR CompareFields[PG_COMPARE_FIELDS_COUNT];
-        WORK_QUEUE_ITEM ClearWorkerItem;
+        struct {
+            PVOID WorkerContext;
 
-        PVOID MmHighestUserAddress;
-        PVOID MmSystemRangeStart;
+            VOID
+            (NTAPI * ExpWorkerThread)(
+                __in PVOID StartContext
+                );
 
-        PMMPTE PxeBase;
-        PMMPTE PpeBase;
-        PMMPTE PdeBase;
-        PMMPTE PteBase;
+            VOID
+            (NTAPI * PspSystemThreadStartup)(
+                __in PKSTART_ROUTINE StartRoutine,
+                __in PVOID StartContext
+                );
 
-        PMMPTE PxeTop;
-        PMMPTE PpeTop;
-        PMMPTE PdeTop;
-        PMMPTE PteTop;
+            VOID
+            (NTAPI * KiStartSystemThread)(
+                VOID
+                );
+        }; // restart ExpWorkerThread
 
-        PMMPFN MmPfnDatabase;
+        VOID
+        (NTAPI * MmFreeIndependentPages)(
+            __in PVOID VirtualAddress,
+            __in SIZE_T NumberOfBytes
+            );
 
-        KIRQL
-        (NTAPI * ExAcquireSpinLockShared)(
-            __inout PEX_SPIN_LOCK SpinLock
+        BOOLEAN
+        (NTAPI * MmSetPageProtection)(
+            __in_bcount(NumberOfBytes) PVOID VirtualAddress,
+            __in SIZE_T NumberOfBytes,
+            __in ULONG NewProtect
             );
 
         VOID
-        (NTAPI * ExReleaseSpinLockShared)(
-            __inout PEX_SPIN_LOCK SpinLock,
-            __in KIRQL OldIrql
+        (NTAPI * SdbpCheckDll)(
+            __in ULONG BugCheckCode,
+            __in ULONG_PTR P1,
+            __in ULONG_PTR P2,
+            __in ULONG_PTR P3,
+            __in ULONG_PTR P4,
+            __in VOID
+            (NTAPI * KeBugCheckEx)(
+                __in ULONG BugCheckCode,
+                __in ULONG_PTR P1,
+                __in ULONG_PTR P2,
+                __in ULONG_PTR P3,
+                __in ULONG_PTR P4
+                ),
+            __in ULONG64 InitialStack
             );
 
-        POOL_TYPE
-        (NTAPI * MmDeterminePoolType)(
-            __in PVOID VirtualAddress
+        VOID
+        (NTAPI * KeBugCheckEx)(
+            __in ULONG BugCheckCode,
+            __in ULONG_PTR P1,
+            __in ULONG_PTR P2,
+            __in ULONG_PTR P3,
+            __in ULONG_PTR P4
             );
 
-        CHAR _SdbpCheckDll[0x40];
-        CHAR _Message[2][0x40];
+        PVOID
+        (NTAPI * RtlLookupFunctionEntry)(
+            __in ULONG64 ControlPc,
+            __out PULONG64 ImageBase,
+            __inout_opt PVOID HistoryTable
+            );
 
-        struct {
-            struct PATCHGUARD_BLOCK * PatchGuardBlock;
+        PEXCEPTION_ROUTINE
+        (NTAPI * RtlVirtualUnwind)(
+            __in ULONG HandlerType,
+            __in ULONG64 ImageBase,
+            __in ULONG64 ControlPc,
+            __in PVOID FunctionEntry,
+            __inout PCONTEXT ContextRecord,
+            __out PVOID * HandlerData,
+            __out PULONG64 EstablisherFrame,
+            __inout_opt PVOID ContextPointers
+            );
 
-            // shellcode clone _ClearEncryptedContext
-            CHAR _ShellCode[0x38];
-        }_ClearEncryptedContext;
+        PLIST_ENTRY
+        (FASTCALL * ExInterlockedRemoveHeadList)(
+            __inout PLIST_ENTRY ListHead,
+            __inout PKSPIN_LOCK Lock
+            );
 
-        struct {
-            struct PATCHGUARD_BLOCK * PatchGuardBlock;
+        ULONG64
+        (NTAPI *  Btc64)(
+            __in ULONG64 a,
+            __in ULONG64 b
+            );
 
-            // shellcode clone _RevertWorkerToSelf
-            CHAR _ShellCode[0x58];
-        }_RevertWorkerToSelf;
+        VOID
+        (NTAPI * ClearCallback)(
+            __in PCONTEXT Context,
+            __in PPGOBJECT Object,
+            __in_opt struct _PGBLOCK * PgBlock,
+            __in_opt PVOID Reserved
+            );
 
-        // shellcode clone _CheckPatchGuardCode
-        CHAR _CheckPatchGuardCode[0x50];
+        LIST_ENTRY List;
+        KSPIN_LOCK Lock;
 
-        struct {
-            LONG_PTR ReferenceCount;
+        PGUARD_OBJECT BugCheckHandle;
 
-            struct PATCHGUARD_BLOCK * PatchGuardBlock;
+        PSTR Message[2];
 
-            PVOID Parameters[4];
+        CHAR _SdbpCheckDll[0x3c];
+        CHAR _Btc64[8];
+        CHAR _Message[0x75];
+        CHAR _ClearCallback[PAGE_SIZE];
+    }PGBLOCK, *PPGBLOCK;
 
-            // shellcode clone _GuardCall
-            CHAR _ShellCode[0x1a0];
-        }_GuardCall[PG_MAXIMUM_CONTEXT_COUNT];
-    }PATCHGUARD_BLOCK, *PPATCHGUARD_BLOCK;
-
-#ifdef _WIN64
     VOID
         NTAPI
-        DisablePatchGuard(
-            __inout PPATCHGUARD_BLOCK PatchGuardBlock
+        PgClear(
+            __inout PPGBLOCK PgBlock
         );
-#endif // _WIN64
 
 #ifdef __cplusplus
 }

@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License")); you may not use this file except in compliance with
@@ -16,7 +16,7 @@
 *
 */
 
-#include <Defs.h>
+#include <defs.h>
 
 #include "Stack.h"
 
@@ -30,30 +30,21 @@ WalkFrameChain(
 {
     ULONG Fp = 0;
     ULONG Index = 0;
-    ULONG LowLimit = 0;
-    ULONG HighLimit = 0;
+    ULONG Top = 0;
+    ULONG Bottom = 0;
+
+    IoGetStackLimits(&Bottom, &Top);
 
     _asm mov Fp, ebp;
 
-    IoGetStackLimits(&LowLimit, &HighLimit);
+    while (Index < Count &&
+        Fp >= Bottom &&
+        Fp < Top) {
+        Callers[Index].Establisher = (PVOID)(*(PULONG)(Fp + 4));
+        Callers[Index].EstablisherFrame = (PVOID *)(Fp + 8);
 
-    while (Index < Count) {
-        __try {
-            if (Fp >= LowLimit &&
-                Fp < HighLimit &&
-                Fp > *(PULONG)MM_HIGHEST_USER_ADDRESS) {
-                Callers[Index].Establisher = (PVOID)(*(PULONG)(Fp + 4));
-                Callers[Index].EstablisherFrame = (PVOID *)(Fp + 8);
-
-                Index += 1;
-            }
-            else {
-                break;
-            }
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            Index = 0;
-        }
+        Index += 1;
+        Fp = *(PULONG)Fp;
     }
 
     return Index;

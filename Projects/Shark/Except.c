@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License")); you may not use this file except in compliance with
@@ -16,34 +16,9 @@
 *
 */
 
-#include <Defs.h>
+#include <defs.h>
 
 #include "Except.h"
-
-#define __ROL32(x, n) (((x) << ((n % 32))) | ((x) >> (32 - (n % 32))))
-#define __ROR32(x, n) (((x) >> ((n % 32))) | ((x) << (32 - (n % 32))))
-
-ULONG
-NTAPI
-EncodeSystemPointer32(
-    __in ULONG Pointer
-)
-{
-    return SharedUserData->Cookie ^ __ROR32(
-        Pointer, 
-        (SharedUserData->Cookie & 0x1f));
-}
-
-ULONG
-NTAPI
-DecodeSystemPointer32(
-    __in ULONG Pointer
-)
-{
-    return SharedUserData->Cookie ^ __ROL32(
-        Pointer, 
-        (SharedUserData->Cookie & 0x1f));
-}
 
 VOID
 NTAPI

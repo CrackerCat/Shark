@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License"); you may not use this file except in compliance with
@@ -19,34 +19,188 @@
 #ifndef _CTX_H_
 #define _CTX_H_
 
+#include "Reload.h"
+
 #ifdef __cplusplus
 /* Assume byte packing throughout */
 extern "C" {
 #endif	/* __cplusplus */
 
-    typedef struct _CTX {
-        USHORT Platform;
-        PUSER_THREAD_START_ROUTINE StartRoutine;
-        PVOID StartContext;
-        NTSTATUS ReturnedStatus;
-        KPROCESSOR_MODE Mode;
-    } CTX, *PCTX;
+#ifdef _WIN64
+    typedef struct _EXCEPTION_FRAME {
+        //
+        // Home address for the parameter registers.
+        //
 
-    typedef struct _ATX {
-        KAPC Apc;
-        KEVENT Notify;
-        CTX Ctx; 
-    } ATX, *PATX;
+        ULONG64 P1Home;
+        ULONG64 P2Home;
+        ULONG64 P3Home;
+        ULONG64 P4Home;
+        ULONG64 P5;
 
-    NTSTATUS
+        //
+        // Kernel callout initial stack value.
+        //
+
+        ULONG64 InitialStack;
+
+        //
+        // Saved nonvolatile floating registers.
+        //
+
+        M128A Xmm6;
+        M128A Xmm7;
+        M128A Xmm8;
+        M128A Xmm9;
+        M128A Xmm10;
+        M128A Xmm11;
+        M128A Xmm12;
+        M128A Xmm13;
+        M128A Xmm14;
+        M128A Xmm15;
+
+        //
+        // Kernel callout frame variables.
+        //
+
+        ULONG64 TrapFrame;
+        ULONG64 CallbackStack;
+        ULONG64 OutputBuffer;
+        ULONG64 OutputLength;
+
+        //
+        // Saved MXCSR when a thread is interrupted in kernel mode via a dispatch
+        // interrupt.
+        //
+
+        ULONG64 MxCsr;
+
+        //
+        // Saved nonvolatile register - not always saved.
+        //
+
+        ULONG64 Rbp;
+
+        //
+        // Saved nonvolatile registers.
+        //
+
+        ULONG64 Rbx;
+        ULONG64 Rdi;
+        ULONG64 Rsi;
+        ULONG64 R12;
+        ULONG64 R13;
+        ULONG64 R14;
+        ULONG64 R15;
+
+        //
+        // EFLAGS and return address.
+        //
+
+        ULONG64 Return;
+    }EXCEPTION_FRAME, *PEXCEPTION_FRAME;
+
+#define EXCEPTION_FRAME_LENGTH sizeof(EXCEPTION_FRAME)
+
+    C_ASSERT((sizeof(EXCEPTION_FRAME) & STACK_ROUND) == 0);
+
+#endif // _WIN64
+
+#define GetBaseTrapFrame(Thread) GetBaseTrapFrameThread(Thread)
+
+    DECLSPEC_NORETURN
+        VOID
         NTAPI
-        RemoteCall(
-            __in HANDLE UniqueThread,
-            __in USHORT Platform,
-            __in_opt PUSER_THREAD_START_ROUTINE StartRoutine,
-            __in_opt PVOID StartContext,
-            __in KPROCESSOR_MODE Mode
+        _CaptureContext(
+            __in ULONG ProgramCounter,
+            __in PVOID Detour,
+            __in PVOID Guard,
+            __in_opt PVOID Parameter,
+            __in_opt PVOID Reserved
         );
+
+    PKTRAP_FRAME
+        NTAPI
+        GetBaseTrapFrameThread(
+            __in PETHREAD Thread
+        );
+
+    FORCEINLINE
+        PKAPC_STATE
+        NTAPI
+        GetApcStateThread(
+            __in PKTHREAD Thread
+        )
+    {
+        return CONTAINING_RECORD(
+            (ULONG_PTR)Thread +
+            GpBlock->DebuggerDataBlock.OffsetKThreadApcProcess,
+            KAPC_STATE,
+            Process);
+    }
+
+    FORCEINLINE
+        KTHREAD_STATE
+        NTAPI
+        GetThreadState(
+            __in PKTHREAD Thread
+        )
+    {
+        return *(PCCHAR)((ULONG_PTR)Thread +
+            GpBlock->DebuggerDataBlock.OffsetKThreadState);
+    }
+
+    FORCEINLINE
+        PLIST_ENTRY
+        NTAPI
+        GetProcessThreadListHead(
+            __inout PGPBLOCK GpBlock,
+            __inout PEPROCESS Process
+        )
+    {
+        return (PLIST_ENTRY)((PCHAR)Process +
+            GpBlock->OffsetKProcessThreadListHead);
+    }
+
+    FORCEINLINE
+        PETHREAD
+        NTAPI
+        GetProcessFirstThread(
+            __inout PGPBLOCK GpBlock,
+            __inout PEPROCESS Process
+        )
+    {
+        return (PETHREAD)
+            ((PCHAR)GetProcessThreadListHead(
+                GpBlock, Process)->Flink -
+                GpBlock->OffsetKThreadThreadListEntry);
+    }
+
+    FORCEINLINE
+        PLIST_ENTRY
+        NTAPI
+        GetThreadListEntry(
+            __inout PGPBLOCK GpBlock,
+            __inout PETHREAD Thread
+        )
+    {
+        return (PLIST_ENTRY)((PCHAR)Thread +
+            GpBlock->OffsetKThreadThreadListEntry);
+    }
+
+    FORCEINLINE
+        PETHREAD
+        NTAPI
+        GetNexThread(
+            __inout PGPBLOCK GpBlock,
+            __inout PETHREAD Thread
+        )
+    {
+        return (PETHREAD)
+            ((PCHAR)(((PLIST_ENTRY)((PCHAR)Thread +
+                GpBlock->OffsetKThreadThreadListEntry))->Flink) -
+                GpBlock->OffsetKThreadThreadListEntry);
+    }
 
 #ifdef __cplusplus
 }

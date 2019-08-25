@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License")); you may not use this file except in compliance with
@@ -16,7 +16,7 @@
 *
 */
 
-#include <Defs.h>
+#include <defs.h>
 
 #include "Scan.h"
 
@@ -112,11 +112,11 @@ TrimBytes(
                                     16,
                                     &Digit);
 
-                                if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
+                                if (NT_SUCCESS(Status)) {
                                     *(Coll + Index / 2) = (CHAR)Digit;
 
                                     *Selector =
-                                        FALSE != *Selector ? TRUE : FALSE;
+                                        *Selector ? TRUE : FALSE;
                                 }
                                 else {
                                     Result = -1;
@@ -149,7 +149,7 @@ TrimBytes(
     }
 
     return Result;
-        }
+}
 
 SIZE_T
 NTAPI
@@ -250,4 +250,4 @@ ScanBytes(
     }
 
     return Result;
-        }
+}

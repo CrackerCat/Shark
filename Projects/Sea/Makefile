@@ -1,6 +1,6 @@
 #
 #
-# Copyright (c) 2018 by blindtiger. All rights reserved.
+# Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 #
 # The contents of this file are subject to the Mozilla Public License Version
 # 2.0 (the "License"); you may not use this file except in compliance with
@@ -16,7 +16,7 @@
 #
 #
 
-LABS=..\..\..
+LABS=..\..\..\
 
 !if "$(PLATFORM)" == "x86"
 ARCTARG = I386
@@ -38,9 +38,9 @@ BUILD: $(PROJTARG).exe
 OBJD = $(SLND)Build\Objs\$(PROJ)\$(ARCTARG)
 
 !if "$(ARCTARG)" == "I386"
-PROJENTRY = Startup
-!else
-PROJENTRY = Startup
+PROJENTRY = NtProcessStartupForGS@4
+!else if "$(ARCTARG)" == "AMD64"
+PROJENTRY = NtProcessStartupForGS
 !endif
 
 ASOBJS = \
@@ -51,7 +51,6 @@ CCARCHOBJS = \
 
 CCOBJS = \
     $(OBJD)\$(PROJ).obj \
-    $(OBJD)\Print.obj \
     $(OBJD)\Sysload.obj
     
 RCOBJS = $(OBJD)\$(PROJ).res
@@ -61,19 +60,18 @@ PROJOBJS = $(ASOBJS) $(CCARCHOBJS) $(CCOBJS) $(RCOBJS)
 PROJSRCS = \
     $(ARCTARG)\$(ARCTARG).asm \
     $(PROJ).c \
-    Print.c \
     Sysload.c
-
+    
 !if "$(ARCTARG)" == "I386"
-TARGDEFS = /D_X86_=1 /Di386=1 /DSTD_CALL /DFPO=0
+TARGDEFS = /D_X86_=1 /Di386=1 /DSTD_CALL /DFPO=0 /DDOSWIN32 /DDETOURS_X86 /DDETOURS_32BIT
 TARGAOPTS = /safeseh /coff /Zm
 TARGCOPTS = /Gz /Gm- /GX- /G7 /Ze /Gi- /QIfdiv- /Od /Oy-
 TARGLOPTS = 
 HOTPATCH = /stub:$(LABS)\WRK\base\ntos\BUILD\PREBUILT\$(ARCTARG)\STUB512.com
 ARCH = X86
 ARCHML = ml
-!else
-TARGDEFS = /D_WIN64 /D_AMD64_ /DAMD64
+!else if "$(ARCTARG)" == "AMD64"
+TARGDEFS = /D_WIN64 /D_AMD64_ /DAMD64 /DDETOURS_X64 /DDETOURS_64BIT
 TARGAOPTS = 
 TARGCOPTS = /Wp64 /Od /EHs-c- /Gs12288
 TARGLOPTS = /IGNORE:4108,4088,4218,4218,4235
@@ -116,18 +114,19 @@ RFLAGS = $(INCS) /fo$(RCOBJS)
 
 
 LINKLIBPATH = \
-    /LIBPATH:$(LABS)\WinDDK\3790.1830\lib\wnet\$(ARCTARG) \
-    /LIBPATH:$(LABS)\WinDDK\3790.1830\lib\crt\$(ARCTARG) \
+    /LIBPATH:$(LABS)\WinDDK\7600.16385.1\lib\win7\$(ARCTARG) \
+    /LIBPATH:$(LABS)\WinDDK\7600.16385.1\lib\Crt\$(ARCTARG) \
     /LIBPATH:$(SLND)\Lib\$(ARCTARG)
 
 LINKIGNORE = /IGNORE:4087,4001,4010,4037,4039,4065,4070,4078,4087,4089,4221,4198
-BUILDLIBS = ntdll.lib bufferoverflow.lib \
+BUILDLIBS = ntdllp.lib bufferoverflow.lib \
 !if "$(ARCTARG)" == "I386"
     \
 !else if "$(ARCTARG)" == "AMD64"
     gshandler.obj gshandlerseh.obj \
 !endif
-    kernel32.lib msvcrt.lib shell32.lib
+    kernl32p.lib msvcrt.lib shell32.lib user32.lib gdi32.lib \
+    nt_process_startup.obj
 
 LINKFLAGS = $(LINKIGNORE) /WX /NODEFAULTLIB /machine:$(ARCH) /debug /debugtype:cv,fixup
 LINK = link.exe /nologo

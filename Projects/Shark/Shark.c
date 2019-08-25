@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License")); you may not use this file except in compliance with
@@ -16,14 +16,15 @@
 *
 */
 
-#include <Defs.h>
-#include <DeviceDefs.h>
+#include <defs.h>
+#include <devicedefs.h>
 
 #include "Shark.h"
 
-#include "Jump.h"
-#include "KernelReload.h"
+#include "Detours.h"
+#include "Reload.h"
 #include "PatchGuard.h"
+#include "Space.h"
 
 VOID
 NTAPI
@@ -78,7 +79,7 @@ DriverEntry(
     UNICODE_STRING DeviceName = { 0 };
     UNICODE_STRING SymbolicLinkName = { 0 };
 
-    RtlInitUnicodeString(&DeviceName, MANAGER_DEVICE_LINK);
+    RtlInitUnicodeString(&DeviceName, DEVICE_STRING);
 
     Status = IoCreateDevice(
         DriverObject,
@@ -89,25 +90,23 @@ DriverEntry(
         FALSE,
         &DeviceObject);
 
-    if ((RTL_SOFT_ASSERT(NT_SUCCESS(Status)))) {
+    if (NT_SUCCESS(Status)) {
         DriverObject->MajorFunction[IRP_MJ_CREATE] = (PDRIVER_DISPATCH)DeviceCreate;
         DriverObject->MajorFunction[IRP_MJ_CLOSE] = (PDRIVER_DISPATCH)DeviceClose;
         DriverObject->MajorFunction[IRP_MJ_WRITE] = (PDRIVER_DISPATCH)DeviceWrite;
         DriverObject->MajorFunction[IRP_MJ_READ] = (PDRIVER_DISPATCH)DeviceRead;
         DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = (PDRIVER_DISPATCH)DeviceControl;
 
-        RtlInitUnicodeString(&SymbolicLinkName, MANAGER_SYMBOLIC_LINK);
+        RtlInitUnicodeString(&SymbolicLinkName, SYMBOLIC_STRING);
 
         Status = IoCreateSymbolicLink(&SymbolicLinkName, &DeviceName);
 
-        if ((RTL_SOFT_ASSERT(NT_SUCCESS(Status)))) {
+        if (NT_SUCCESS(Status)) {
             DriverObject->DriverUnload = (PDRIVER_UNLOAD)DriverUnload;
 
-            InitializeLoadedModuleList(NULL);
-
-#ifndef VMP
-            DbgPrint("Shark - load\n");
-#endif // !VMP
+#ifndef PUBLIC
+            DbgPrint("[Shark] load\n");
+#endif // !PUBLIC
         }
         else {
             IoDeleteDevice(DeviceObject);
@@ -125,13 +124,13 @@ DriverUnload(
 {
     UNICODE_STRING SymbolicLinkName = { 0 };
 
-    RtlInitUnicodeString(&SymbolicLinkName, MANAGER_SYMBOLIC_LINK);
+    RtlInitUnicodeString(&SymbolicLinkName, SYMBOLIC_STRING);
     IoDeleteSymbolicLink(&SymbolicLinkName);
     IoDeleteDevice(DriverObject->DeviceObject);
 
-#ifndef VMP
-    DbgPrint("Shark - unload\n");
-#endif // !VMP
+#ifndef PUBLIC
+    DbgPrint("[Shark] - unload\n");
+#endif // !PUBLIC
 }
 
 NTSTATUS
@@ -223,22 +222,26 @@ DeviceControl(
     IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
     switch (IrpSp->Parameters.DeviceIoControl.IoControlCode) {
-    case API_METHOD_DISABLE_PATCHGUARD: {
-        PPATCHGUARD_BLOCK PatchGuardBlock = NULL;
+    case 0: {
+        PPGBLOCK PgBlock = NULL;
 
-        PatchGuardBlock = ExAllocatePool(
+        GpBlock = ExAllocatePool(
             NonPagedPool,
-            sizeof(PATCHGUARD_BLOCK));
+            sizeof(GPBLOCK) + sizeof(PGBLOCK));
 
-        if (NULL != PatchGuardBlock) {
-            RtlZeroMemory(PatchGuardBlock, sizeof(PATCHGUARD_BLOCK));
+        if (NULL != GpBlock) {
+            RtlZeroMemory(
+                GpBlock,
+                sizeof(GPBLOCK) + sizeof(PGBLOCK));
 
-#ifdef _WIN64
-            DisablePatchGuard(PatchGuardBlock);
-#endif // _WIN64
+            InitializeGpBlock(GpBlock);
+            InitializeSystemSpace(GpBlock);
 
-            // free must after PatchGuard context cleared
-            // ExFreePool(PatchGuardBlock);
+            PgBlock =(PCHAR)GpBlock + sizeof(GPBLOCK);
+
+            GpBlock->Flags.Guard = TRUE;
+
+            PgClear(PgBlock);
         }
 
         Irp->IoStatus.Information = 0;

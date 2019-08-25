@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2018 by blindtiger. All rights reserved.
+* Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License"); you may not use this file except in compliance with
@@ -16,7 +16,7 @@
 *
 */
 
-#include <Defs.h>
+#include <defs.h>
 
 #include "Sysload.h"
 
@@ -109,9 +109,115 @@ SetValueKey(
     return Status;
 }
 
+VOID
+NTAPI
+DeleteKey(
+    __in PUNICODE_STRING KeyPath
+)
+{
+    NTSTATUS Status = STATUS_SUCCESS;
+    HANDLE KeyHandle = NULL;
+    OBJECT_ATTRIBUTES ObjectAttributes = { 0 };
+    PKEY_BASIC_INFORMATION BasicInformation = NULL;
+    PKEY_VALUE_BASIC_INFORMATION ValueBasicInformation = NULL;
+    UNICODE_STRING KeyName = { 0 };
+    UNICODE_STRING Separator = { 0 };
+    UNICODE_STRING SubKeyName = { 0 };
+    PWSTR KeyNameBuffer = NULL;
+    ULONG Length = 0;
+    ULONG ResultLength = 0;
+
+    InitializeObjectAttributes(
+        &ObjectAttributes,
+        KeyPath,
+        OBJ_CASE_INSENSITIVE,
+        NULL,
+        NULL);
+
+    Status = NtOpenKey(
+        &KeyHandle,
+        KEY_ALL_ACCESS,
+        &ObjectAttributes);
+
+    if (NT_SUCCESS(Status)) {
+        Length =
+            MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR) +
+            FIELD_OFFSET(KEY_BASIC_INFORMATION, Name);
+
+        BasicInformation = RtlAllocateHeap(
+            RtlProcessHeap(),
+            0,
+            Length +
+            MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR) +
+            MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR) +
+            FIELD_OFFSET(KEY_VALUE_BASIC_INFORMATION, Name));
+
+        if (NULL != BasicInformation) {
+            KeyNameBuffer = (PCHAR)BasicInformation + Length;
+            ValueBasicInformation = KeyNameBuffer + MAXIMUM_FILENAME_LENGTH;
+
+            do {
+                Status = NtEnumerateKey(
+                    KeyHandle,
+                    0,
+                    KeyBasicInformation,
+                    BasicInformation,
+                    Length,
+                    &ResultLength);
+
+                if (NT_SUCCESS(Status)) {
+                    SubKeyName.Buffer = KeyNameBuffer;
+                    SubKeyName.Length = 0;
+                    SubKeyName.MaximumLength = (USHORT)MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR);
+
+                    KeyName.Buffer = BasicInformation->Name;
+                    KeyName.Length = (USHORT)BasicInformation->NameLength;
+                    KeyName.MaximumLength = (USHORT)MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR);
+
+                    RtlInitUnicodeString(&Separator, L"\\");
+
+                    RtlAppendStringToString(&SubKeyName, KeyPath);
+                    RtlAppendStringToString(&SubKeyName, &Separator);
+                    RtlAppendStringToString(&SubKeyName, &KeyName);
+
+                    DeleteKey(&SubKeyName);
+                }
+            } while (NT_SUCCESS(Status));
+
+            do {
+                Status = NtEnumerateValueKey(
+                    KeyHandle,
+                    0,
+                    KeyValueBasicInformation,
+                    ValueBasicInformation,
+                    Length,
+                    &ResultLength);
+
+                if (NT_SUCCESS(Status)) {
+                    KeyName.Buffer = ValueBasicInformation->Name;
+                    KeyName.Length = (USHORT)ValueBasicInformation->NameLength;
+                    KeyName.MaximumLength = (USHORT)MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR);
+
+                    NT_SUCCESS(NtDeleteValueKey(
+                        KeyHandle,
+                        &KeyName));
+                }
+            } while (NT_SUCCESS(Status));
+
+            RtlFreeHeap(
+                RtlProcessHeap(),
+                0,
+                BasicInformation);
+        }
+
+        NT_SUCCESS(NtDeleteKey(KeyHandle));
+        NT_SUCCESS(NtClose(KeyHandle));
+    }
+}
+
 NTSTATUS
 NTAPI
-LoadSystemImage(
+LoadKernelImage(
     __in PWSTR ImageFileName,
     __in PWSTR ServiceName
 )
@@ -119,9 +225,9 @@ LoadSystemImage(
     NTSTATUS Status = STATUS_SUCCESS;
     HANDLE KeyHandle = NULL;
     OBJECT_ATTRIBUTES ObjectAttributes = { 0 };
-    PWSTR KeyPathBuffer = NULL;
     UNICODE_STRING KeyPath = { 0 };
-    PWSTR ImagePathBuffer = NULL;
+    PWSTR KeyPathBuffer = NULL;
+    UNICODE_STRING KeyName = { 0 };
     UNICODE_STRING ImagePath = { 0 };
     ULONG Type = 1;
     ULONG Start = 3;
@@ -134,20 +240,21 @@ LoadSystemImage(
         FALSE,
         &WasEnabled);
 
-    if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
+    if (NT_SUCCESS(Status)) {
         KeyPathBuffer = RtlAllocateHeap(
             RtlProcessHeap(),
             0,
             MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR));
 
         if (NULL != KeyPathBuffer) {
-            wcscpy(
-                KeyPathBuffer,
-                L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\");
+            KeyPath.Buffer = KeyPathBuffer;
+            KeyPath.Length = 0;
+            KeyPath.MaximumLength = MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR);
 
-            wcscat(KeyPathBuffer, ServiceName);
-
-            RtlInitUnicodeString(&KeyPath, KeyPathBuffer);
+            RtlInitUnicodeString(&KeyName, ServicesDirectory);
+            RtlAppendStringToString(&KeyPath, &KeyName);
+            RtlInitUnicodeString(&KeyName, ServiceName);
+            RtlAppendStringToString(&KeyPath, &KeyName);
 
             InitializeObjectAttributes(
                 &ObjectAttributes,
@@ -165,101 +272,61 @@ LoadSystemImage(
                 REG_OPTION_VOLATILE,
                 NULL);
 
-            if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
-                Status = SetValueKey(
+            if (NT_SUCCESS(Status)) {
+                NT_SUCCESS(SetValueKey(
                     KeyHandle,
                     L"Type",
                     REG_DWORD,
                     &Type,
-                    sizeof(Type));
+                    sizeof(Type)));
 
-                RTL_SOFT_ASSERT((RTL_SOFT_ASSERT(NT_SUCCESS(Status))));
-
-                Status = SetValueKey(
+                NT_SUCCESS(SetValueKey(
                     KeyHandle,
                     L"ErrorControl",
                     REG_DWORD,
                     &ErrorControl,
-                    sizeof(ErrorControl));
+                    sizeof(ErrorControl)));
 
-                RTL_SOFT_ASSERT((RTL_SOFT_ASSERT(NT_SUCCESS(Status))));
-
-                Status = SetValueKey(
+                NT_SUCCESS(SetValueKey(
                     KeyHandle,
                     L"Start",
                     REG_DWORD,
                     &Start,
-                    sizeof(Start));
+                    sizeof(Start)));
 
-                RTL_SOFT_ASSERT((RTL_SOFT_ASSERT(NT_SUCCESS(Status))));
-
-                Status = SetValueKey(
+                NT_SUCCESS(SetValueKey(
                     KeyHandle,
                     L"DisplayName",
                     REG_SZ,
                     ServiceName,
-                    wcslen(ServiceName) * sizeof(WCHAR) + sizeof(UNICODE_NULL));
+                    wcslen(ServiceName) * sizeof(WCHAR) + sizeof(UNICODE_NULL)));
 
-                RTL_SOFT_ASSERT((RTL_SOFT_ASSERT(NT_SUCCESS(Status))));
+                RtlInitUnicodeString(&ImagePath, ImageFileName);
 
-                Status = RtlDosPathNameToNtPathName_U_WithStatus(
-                    ImageFileName,
-                    &ImagePath,
-                    NULL,
-                    NULL);
-
-                if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
-                    ImagePathBuffer = RtlAllocateHeap(
-                        RtlProcessHeap(),
-                        0,
-                        MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR));
-
-                    if (NULL != ImagePathBuffer) {
-                        RtlCopyMemory(
-                            ImagePathBuffer,
-                            ImagePath.Buffer,
-                            ImagePath.Length);
-
-                        RtlZeroMemory(
-                            (PCHAR)ImagePathBuffer + ImagePath.Length,
-                            sizeof(UNICODE_NULL));
-
-                        Status = SetValueKey(
-                            KeyHandle,
-                            L"ImagePath",
-                            REG_EXPAND_SZ,
-                            ImagePathBuffer,
-                            ImagePath.Length + sizeof(UNICODE_NULL));
-
-                        RtlFreeHeap(
-                            RtlProcessHeap(),
-                            0,
-                            ImagePathBuffer);
-                    }
-                    else {
-                        Status = STATUS_NO_MEMORY;
-                    }
-
-                    RtlFreeUnicodeString(&ImagePath);
-                }
+                NT_SUCCESS(SetValueKey(
+                    KeyHandle,
+                    L"ImagePath",
+                    REG_EXPAND_SZ,
+                    ImagePath.Buffer,
+                    ImagePath.Length + sizeof(UNICODE_NULL)));
 
                 Status = NtLoadDriver(&KeyPath);
 
-                RTL_SOFT_ASSERT(NT_SUCCESS(NtClose(KeyHandle)));
-            }
-
-            if (FALSE == WasEnabled) {
-                Status = RtlAdjustPrivilege(
-                    SE_LOAD_DRIVER_PRIVILEGE,
-                    FALSE,
-                    FALSE,
-                    &WasEnabled);
+                NT_SUCCESS(NtClose(KeyHandle));
             }
 
             RtlFreeHeap(
                 RtlProcessHeap(),
                 0,
                 KeyPathBuffer);
+        }
+
+        if (FALSE == WasEnabled) {
+            Status = RtlAdjustPrivilege(
+                SE_LOAD_DRIVER_PRIVILEGE,
+                FALSE,
+                FALSE,
+                &WasEnabled);
         }
     }
 
@@ -268,15 +335,16 @@ LoadSystemImage(
 
 NTSTATUS
 NTAPI
-UnloadSystemImage(
+UnloadKernelImage(
     __in PWSTR ServiceName
 )
 {
     NTSTATUS Status = STATUS_SUCCESS;
     HANDLE KeyHandle = NULL;
     OBJECT_ATTRIBUTES ObjectAttributes = { 0 };
-    PWSTR KeyPathBuffer = NULL;
     UNICODE_STRING KeyPath = { 0 };
+    PWSTR KeyPathBuffer = NULL;
+    UNICODE_STRING KeyName = { 0 };
     BOOLEAN WasEnabled = FALSE;
 
     Status = RtlAdjustPrivilege(
@@ -285,20 +353,21 @@ UnloadSystemImage(
         FALSE,
         &WasEnabled);
 
-    if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
+    if (NT_SUCCESS(Status)) {
         KeyPathBuffer = RtlAllocateHeap(
             RtlProcessHeap(),
             0,
             MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR));
 
         if (NULL != KeyPathBuffer) {
-            wcscpy(
-                KeyPathBuffer,
-                L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\");
+            KeyPath.Buffer = KeyPathBuffer;
+            KeyPath.Length = 0;
+            KeyPath.MaximumLength = MAXIMUM_FILENAME_LENGTH * sizeof(WCHAR);
 
-            wcscat(KeyPathBuffer, ServiceName);
-
-            RtlInitUnicodeString(&KeyPath, KeyPathBuffer);
+            RtlInitUnicodeString(&KeyName, ServicesDirectory);
+            RtlAppendStringToString(&KeyPath, &KeyName);
+            RtlInitUnicodeString(&KeyName, ServiceName);
+            RtlAppendStringToString(&KeyPath, &KeyName);
 
             InitializeObjectAttributes(
                 &ObjectAttributes,
@@ -312,14 +381,14 @@ UnloadSystemImage(
                 KEY_ALL_ACCESS,
                 &ObjectAttributes);
 
-            if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
+            if (NT_SUCCESS(Status)) {
                 Status = NtUnloadDriver(&KeyPath);
 
-                if (RTL_SOFT_ASSERT(NT_SUCCESS(Status))) {
-                    RTL_SOFT_ASSERT(NT_SUCCESS(NtDeleteKey(KeyHandle)));
+                if (NT_SUCCESS(Status)) {
+                    DeleteKey(&KeyPath);
                 }
 
-                RTL_SOFT_ASSERT(NT_SUCCESS(NtClose(KeyHandle)));
+                NT_SUCCESS(NtClose(KeyHandle));
             }
 
             RtlFreeHeap(

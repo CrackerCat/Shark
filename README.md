@@ -1,56 +1,29 @@
 # Shark
-Turn off PatchGuard in real time for win7 (7600) ~ win10 (17763).
+    Turn off PatchGuard in real time for win7 (7600) ~ win10 (17763).
 
-├─Shark
-│  ├─Build
-│  │  ├─Bins
-│  │  │  ├─AMD64
-│  │  │  └─I386
-│  │  └─Objs
-│  │      ├─Sea
-│  │      │  ├─AMD64
-│  │      │  └─I386
-│  │      └─Shark
-│  │          ├─AMD64
-│  │          └─I386
-│  ├─Include
-│  ├─Lib
-│  │  ├─amd64
-│  │  └─i386
-│  └─Projects
-│      ├─Sea
-│      │  ├─AMD64
-│      │  └─I386
-│      └─Shark
-│          ├─AMD64
-│          └─I386
-├─WinDDK
-│  └─3790.1830
-│      ├─inc
-│      │  ├─crt
-│      │  │  ├─gl
-│      │  │  └─sys
-│      │  ├─ddk
-│      │  │  ├─wdm
-│      │  │  │  └─wnet
-│      │  │  └─wnet
-│      │  └─wnet
-│      └──lib
-│         ├─crt
-│         │  ├─amd64
-│         │  └─i386
-│         └─wnet
-│            ├─amd64
-│            └─i386
-└─WRK
-    ├─base
-    │  ├─inc
-    │  └─ntos
-    ├─public
-    │  ├─ddk
-    │  ├─halkit
-    │  ├─internal
-    │  └─sdk
-    └─tools
-       ├─amd64
-       └─x86
+# Create labs
+    md X:\Labs
+    cd /d X:\Labs
+    git clone https://github.com/9176324/Shark
+    git clone https://github.com/9176324/WinDDK
+    git clone https://github.com/9176324/WRK
+
+# Build
+    Method 1: open "X:\Labs\Shark\Shark.sln" with VisualStudio
+    Method 2: run Build.cmd
+    
+# Install
+    run Sea.exe (The driver has no signature, you must mount windbg, or you can sign it)
+
+# Uninstall
+    restart windows
+
+# References (sort by first letter of the name)
+    DisableWin10PatchguardPoc, https://github.com/killvxk/DisableWin10PatchguardPoc
+    EfiGuard, https://github.com/Mattiwatti/EfiGuard
+    findpg, https://github.com/tandasat/findpg
+    PgResarch, https://github.com/tandasat/PgResarch
+    UPGDSED, https://github.com/hfiref0x/UPGDSED
+
+# Note
+    Micro$oft updata windows very fast, For 1903 and higher please donate 3000$.

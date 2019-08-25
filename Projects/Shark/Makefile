@@ -1,6 +1,6 @@
 #
 #
-# Copyright (c) 2018 by blindtiger. All rights reserved.
+# Copyright (c) 2015 - 2019 by blindtiger. All rights reserved.
 #
 # The contents of this file are subject to the Mozilla Public License Version
 # 2.0 (the "License"); you may not use this file except in compliance with
@@ -16,7 +16,7 @@
 #
 #
 
-LABS=..\..\..
+LABS=..\..\..\
 
 !if "$(PLATFORM)" == "x86"
 ARCTARG = I386
@@ -48,19 +48,21 @@ ASOBJS = \
     $(OBJD)\Cmp$(ARCTARG).obj
 
 CCARCHOBJS = \
+    $(OBJD)\Context$(ARCTARG).obj \
     $(OBJD)\PatchGuard$(ARCTARG).obj \
-    $(OBJD)\PatchGuardInline$(ARCTARG).obj \
+    $(OBJD)\Space$(ARCTARG).obj \
     $(OBJD)\Stack$(ARCTARG).obj
 
 CCOBJS = \
     $(OBJD)\$(PROJ).obj \
     $(OBJD)\Ctx.obj \
+    $(OBJD)\Detours.obj \
     $(OBJD)\Except.obj \
-    $(OBJD)\Jump.obj \
-    $(OBJD)\Lock.obj \
-    $(OBJD)\KernelReload.obj \
     $(OBJD)\PatchGuard.obj \
+    $(OBJD)\Reload.obj \
+    $(OBJD)\Rtx.obj \
     $(OBJD)\Scan.obj \
+    $(OBJD)\Space.obj \
     $(OBJD)\Stack.obj
     
 RCOBJS = $(OBJD)\$(PROJ).res
@@ -69,30 +71,32 @@ PROJOBJS = $(ASOBJS) $(CCARCHOBJS) $(CCOBJS) $(RCOBJS)
 
 PROJSRCS = \
     $(ARCTARG)\$(ARCTARG).asm \
+    $(ARCTARG)\Context$(ARCTARG).asm \
     $(ARCTARG)\PatchGuard$(ARCTARG).c \
-    $(ARCTARG)\PatchGuardInline$(ARCTARG).c \
+    $(ARCTARG)\Space$(ARCTARG).c \
     $(ARCTARG)\Stack$(ARCTARG).c \
     $(PROJ).c \
     Ctx.c \
     Cmp$(ARCTARG).asm \
+    Detours.c \
     Except.c \
-    Jump.c \
-    Lock.c \
-    KernelReload.c \
     PatchGuard.c \
+    Reload.c \
+    Rtx.c \
     Scan.c \
+    Space.c \
     Stack.c
-
+    
 !if "$(ARCTARG)" == "I386"
-TARGDEFS = /D_X86_=1 /Di386=1 /DSTD_CALL /DFPO=0
+TARGDEFS = /D_X86_=1 /Di386=1 /DSTD_CALL /DFPO=0 /DDOSWIN32 /DDETOURS_X86 /DDETOURS_32BIT
 TARGAOPTS = /safeseh /coff /Zm
 TARGCOPTS = /Gz /Gm- /GX- /G7 /Ze /Gi- /QIfdiv- /Od /Oy-
 TARGLOPTS = 
 HOTPATCH = /stub:$(LABS)\WRK\base\ntos\BUILD\PREBUILT\$(ARCTARG)\STUB512.com
 ARCH = X86
 ARCHML = ml
-!else
-TARGDEFS = /D_WIN64 /D_AMD64_ /DAMD64
+!else if "$(ARCTARG)" == "AMD64"
+TARGDEFS = /D_WIN64 /D_AMD64_ /DAMD64 /DDETOURS_X64 /DDETOURS_64BIT
 TARGAOPTS = 
 TARGCOPTS = /Wp64 /Od /EHs-c- /Gs12288
 TARGLOPTS = /IGNORE:4108,4088,4218,4218,4235
@@ -117,9 +121,9 @@ INCS = \
     /I$(LABS)\WinDDK\3790.1830\inc\crt\gl \
     /I$(SLND)\Include \
     /I$(PROJD)
-
+    
 DEFS = /DUNICODE /D_UNICODE $(TARGDEFS) /DCONDITION_HANDLING=1 /DNT_INST=0 /DWIN32=100 /D_NT1X_=100 /DWINNT=1 \
-    /DDBG=1 /DDEVL=1 /DNDEBUG /D_NTSYSHARK_ /DNT_SMT /DNTOS_KERNEL_RUNTIME=1 /D_NTDRIVER_
+    /DDEVL=1 /DNDEBUG /D_NTSYSTEM_ /DNT_SMT /DNTOS_KERNEL_RUNTIME=1 /D_NTDRIVER_
 
 COPTS = /Z7 /Zl /Zp8 /Gy /cbstring /W3 /WX /GR- /GF /GS $(TARGCOPTS)
 COMPILERWARNINGS = /FI$(LABS)\WRK\base\ntos\BUILD\WARNING.h /FI$(SLND)\Include\WARNING.h
@@ -135,8 +139,8 @@ RC = rc.exe
 RFLAGS = $(INCS) /fo$(RCOBJS)
 
 LINKLIBPATH = \
-    /LIBPATH:$(LABS)\WinDDK\3790.1830\lib\wnet\$(ARCTARG) \
-    /LIBPATH:$(LABS)\WinDDK\3790.1830\lib\crt\$(ARCTARG) \
+    /LIBPATH:$(LABS)\WinDDK\7600.16385.1\lib\win7\$(ARCTARG) \
+    /LIBPATH:$(LABS)\WinDDK\7600.16385.1\lib\Crt\$(ARCTARG) \
     /LIBPATH:$(SLND)\Lib\$(ARCTARG)
 
 LINKIGNORE = /IGNORE:4087,4001,4010,4037,4039,4065,4070,4078,4087,4089,4221,4198
@@ -146,7 +150,7 @@ BUILDLIBS = hal.lib ntoskrnl.lib bufferoverflowk.lib \
 !else if "$(ARCTARG)" == "AMD64"
     gshandler.obj gshandlerseh.obj \
 !endif
-    disasm.obj
+    detours.lib
 
 LINKFLAGS = $(LINKIGNORE) /WX /NODEFAULTLIB /machine:$(ARCH) /debug /debugtype:cv,fixup
 LINK = link.exe /nologo

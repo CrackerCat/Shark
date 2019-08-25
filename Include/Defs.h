@@ -1,6 +1,6 @@
 /*
 *
-* Copyright (c) 2015-2018 by blindtiger ( blindtiger@foxmail.com )
+* Copyright (c) 2015-2015 - 2019 by blindtiger ( blindtiger@foxmail.com )
 *
 * The contents of this file are subject to the Mozilla Public License Version
 * 2.0 (the "License"); you may not use this file except in compliance with
@@ -24,6 +24,12 @@
 extern "C" {
 #endif	/* __cplusplus */
 
+#define SERIAL "9ARX-3J9H-HCQK"
+
+#ifndef PUBLIC
+// #define PUBLIC
+#endif // !PUBLIC
+
 #ifndef NTOS_KERNEL_RUNTIME
 #include <nt.h>
 #include <ntrtl.h>
@@ -31,6 +37,8 @@ extern "C" {
 
 #include <windows.h>
 #include <windowsx.h>
+
+#define PAGE_SIZE 0x1000
 #else
 #include <ntos.h>
 #include <zwapi.h>
@@ -43,6 +51,15 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <tchar.h>
+
+#include <arccodes.h>
+#include <ntddkbd.h>
+#include <ntddmou.h>
+
+#define SystemRootDirectory L"\\SystemRoot\\System32\\"
+#define Wow64SystemRootDirectory L"\\SystemRoot\\SysWOW64\\"
+
+#define ServicesDirectory L"\\Registry\\Machine\\System\\CurrentControlSet\\Services\\"
 
 #ifdef __cplusplus
 }
